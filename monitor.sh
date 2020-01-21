@@ -63,7 +63,7 @@ export RUNTIME_ARGS=("$@")
 #SOURCE SETUP AND ARGV FILES
 source './support/argv'
 source './support/init'
-
+PREF_STARTUP_SETTLE_TIME=10
 #SOURCE FUNCTIONS
 source './support/mqtt'
 source './support/log'
@@ -1066,10 +1066,14 @@ while true; do
 			topic_path_of_instruction="${data%%|*}"
 			data_of_instruction="${data##*|}"
 
-			#IGNORE INSTRUCTION FROM SELF
+
+
+			is_for_self=$([[ ${topic_path_of_instruction^^} =~ .*${mqtt_publisher_identity^^}/SCAN/.* ]] && echo true || echo false)
+
+			#IGNORE INSTRUCTION FROM SELF IF NOT A SCAN REQUEST FOR SELF
 			if [[ ${data_of_instruction^^} =~ .*${mqtt_publisher_identity^^}.* ]] || [[ ${topic_path_of_instruction^^} =~ .*${mqtt_publisher_identity^^}.* ]]; then 
-				continue
-			fi 
+				[[ $is_for_self == false ]] && continue
+			fi
 
 			#GET THE TOPIC 
 			mqtt_topic_branch=$(basename "$topic_path_of_instruction")
@@ -1088,11 +1092,15 @@ while true; do
 					$PREF_VERBOSE_LOGGING && log "${GREEN}[CMD-INST]	${NC}[${RED}fail mqtt${NC}] arrive scan rejected due to recent scan ${NC}"
 				fi 
 				
-			elif [[ $mqtt_topic_branch =~ .*KNOWN\ DEVICE\ STATES.* ]]; then 				
-
+			elif [[ $mqtt_topic_branch =~ .*KNOWN\ DEVICE\ STATES.* ]]; then
+echo "known_static_beacons:" ; printf "%s\n" "${known_static_beacons[@]}"
+echo "known_static_addresses: " ; printf "%s\n" "${known_static_addresses[@]}"
+echo "known_public_device_log: " ; printf "%s\n" "${known_public_device_log[@]}"
+echo "public_device_log: " ; printf "%s\n" "${public_device_log[@]}"
 				#SIMPLE STATUS MESSAGE FOR KNOWN
 				device_state=""
-				for addr in "${known_static_addresses[@]^^}"; do 
+				for addr in "${known_static_addresses[@]^^}"; do
+					log "checking addr: ${addr}"
 					#GET STATE; ONLY SCAN FOR DEVICES WITH SPECIFIC STATE
 					device_state="${known_public_device_log[$addr]}"
 					device_state=${device_state:-0}
@@ -1107,6 +1115,21 @@ while true; do
 					"name=${known_public_device_name[$addr]}" \
 					"type=KNOWN_MAC"
 
+				done
+				for addr in "${known_static_beacons[@]^^}"; do
+					log "checking addr: ${addr}"
+					#GET STATE; ONLY SCAN FOR DEVICES WITH SPECIFIC STATE
+					device_state="${public_device_log[$addr]}"
+					device_state=${device_state:-0}
+log "device_state: ${device_state}"
+					#SET TO CONFIDENCE RANGE
+					[ "$device_state" -gt 0 ] && device_state=100
+
+					#SEND STATUS UPDATE
+					publish_presence_message  \
+					"id=$addr" \
+					"confidence=$device_state" \
+					"type=KNOWN_MAC"
 				done
 				
 			elif [[ $mqtt_topic_branch =~ .*ADD\ STATIC\ DEVICE.* ]] || [[ $mqtt_topic_branch =~ .*DELETE\ STATIC\ DEVICE.* ]]; then 
